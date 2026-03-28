@@ -40,8 +40,8 @@ export const config = {
   },
 
   gupshup: {
-    appName: required('GUPSHUP_APP_NAME'),
-    apiKey: required('GUPSHUP_API_KEY'),
+    userId: required('GUPSHUP_USER_ID'),
+    password: required('GUPSHUP_PASSWORD'),
     whatsappNumber: required('GUPSHUP_WHATSAPP_NUMBER'),
   },
 
