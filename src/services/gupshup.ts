@@ -2,32 +2,45 @@ import axios from 'axios';
 import { config } from '../config/index.js';
 import { logger } from '../config/logger.js';
 
-const GUPSHUP_API = 'https://api.gupshup.io/sm/api/v1/msg';
+const GUPSHUP_API = 'https://media.smsgupshup.com/GatewayAPI/rest';
 
 /**
- * Send a plain text message via Gupshup WhatsApp API.
+ * Build the common auth + routing params required by the Gupshup REST gateway.
+ */
+function baseParams(to: string): Record<string, string> {
+  return {
+    userid: config.gupshup.userId,
+    password: config.gupshup.password,
+    send_to: normalizePhone(to),
+    auth_scheme: 'plain',
+    method: 'SendMessage',
+    v: '1.1',
+    format: 'json',
+  };
+}
+
+/**
+ * Send a plain text message via Gupshup SMS/WhatsApp REST gateway.
  */
 export async function sendText(to: string, text: string): Promise<void> {
   const phone = normalizePhone(to);
   try {
-    await axios.post(
-      GUPSHUP_API,
-      new URLSearchParams({
-        channel: 'whatsapp',
-        source: config.gupshup.whatsappNumber,
-        destination: phone,
-        message: JSON.stringify({ type: 'text', text }),
-        'src.name': config.gupshup.appName,
-      }),
-      {
-        headers: {
-          apikey: config.gupshup.apiKey,
-          'Content-Type': 'application/x-www-form-urlencoded',
-        },
-        timeout: 10000,
-      }
-    );
-    logger.debug('Sent WhatsApp message', { to: phone, preview: text.slice(0, 50) });
+    const params = new URLSearchParams({
+      ...baseParams(to),
+      msg_type: 'DATA_TEXT',
+      msg: text,
+    });
+
+    const response = await axios.post(GUPSHUP_API, params, {
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      timeout: 10000,
+    });
+
+    logger.debug('Sent message via Gupshup', {
+      to: phone,
+      preview: text.slice(0, 50),
+      response: response.data,
+    });
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : String(err);
     logger.error('Gupshup send error', { error: msg, to: phone });
@@ -36,44 +49,16 @@ export async function sendText(to: string, text: string): Promise<void> {
 
 /**
  * Send a list of quick-reply buttons.
+ * The Gupshup REST gateway does not support interactive buttons natively,
+ * so this falls back to a numbered plain-text list.
  */
 export async function sendButtons(
   to: string,
   body: string,
   buttons: { id: string; title: string }[]
 ): Promise<void> {
-  const phone = normalizePhone(to);
-  const message = {
-    type: 'quick_reply',
-    msgid: `msg_${Date.now()}`,
-    content: { type: 'text', text: body },
-    options: buttons.map((b) => ({ type: 'text', title: b.title, postbackText: b.id })),
-  };
-
-  try {
-    await axios.post(
-      GUPSHUP_API,
-      new URLSearchParams({
-        channel: 'whatsapp',
-        source: config.gupshup.whatsappNumber,
-        destination: phone,
-        message: JSON.stringify(message),
-        'src.name': config.gupshup.appName,
-      }),
-      {
-        headers: {
-          apikey: config.gupshup.apiKey,
-          'Content-Type': 'application/x-www-form-urlencoded',
-        },
-        timeout: 10000,
-      }
-    );
-  } catch (err: unknown) {
-    // Fall back to plain text if buttons fail
-    logger.warn('Button send failed, falling back to text', { to: phone });
-    const fallback = body + '\n\n' + buttons.map((b, i) => `${i + 1}. ${b.title}`).join('\n');
-    await sendText(to, fallback);
-  }
+  const fallback = body + '\n\n' + buttons.map((b, i) => `${i + 1}. ${b.title}`).join('\n');
+  await sendText(to, fallback);
 }
 
 function normalizePhone(phone: string): string {
